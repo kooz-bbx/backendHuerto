@@ -1,75 +1,98 @@
-# 🌱 backendHuerto · Microservicio Spring Boot
+# Gas El Volcán — Backend (Spring Boot) · Evaluación Parcial 3, DSY1104
 
-Microservicio REST del **Huerto Escolar** (DSY1105 · Duoc UC). Gestiona **sectores** y **cultivos** y los guarda en **MySQL/MariaDB (XAMPP)**.
-La app Android (repo **huerto-escolar**) lo consume con Retrofit.
+API REST para la tienda **Distribuidora de Gas El Volcán**: catálogo, usuarios con roles, compras, pedidos por teléfono y reparto (operadora + repartidores).
+Se conecta a **MySQL**, documenta los endpoints con **Swagger** y protege todo con **JWT**.
 
-## 🛠️ Tecnologías
-Java 17 · Spring Boot 3.3 · Spring Web · Spring Data JPA (Hibernate) · Bean Validation · MariaDB/MySQL (XAMPP) · JUnit 5 + Mockito
-
-## 🗂️ Estructura (arquitectura en capas)
-```
-cl.duoc.huertoapi
-├── HuertoApiApplication.java    → punto de entrada
-├── controller/                  → endpoints REST (reciben la petición HTTP)
-├── service/                     → reglas de negocio
-├── repository/                  → acceso a la base de datos (Spring Data JPA)
-├── model/                       → entidades JPA (tablas): Sector, Cultivo y sus estados
-├── dto/                         → datos que viajan en JSON (con validaciones)
-├── exception/                   → errores y respuestas HTTP (404, 409, 400)
-└── config/DatosIniciales.java   → carga los datos de prueba si la base está vacía
-```
-**Flujo:** `App → Controller → Service → Repository → MySQL`
-
-## 🧱 Entidades y relación
-| Tabla | Campos principales |
+| Tecnología | Uso |
 |---|---|
-| `sectores` | id, codigo (único, `S-01`), nombre, descripcion, ubicacion, estado, responsable_id, fechas |
-| `cultivos` | id, nombre, descripcion, **sector_id (FK → sectores)**, fecha_siembra, fecha_trasplante, fecha_cosecha, frecuencia_riego_dias, estado, observaciones |
+| Java 17+ (recomendado JDK 21) y Spring Boot 3.3 | Aplicación |
+| Spring Data JPA + MySQL | Persistencia (tablas creadas solas con `ddl-auto=update`) |
+| Spring Security + JJWT | Autenticación JWT sin sesión (stateless), roles |
+| BCrypt | Contraseñas guardadas con hash |
+| springdoc-openapi | Swagger UI |
+| Bean Validation | Validación de datos de entrada |
 
-Relación: **un sector tiene muchos cultivos** (`@ManyToOne` en `Cultivo`).
+## Cómo ejecutarlo
 
-## 🔗 Endpoints
-| Método | Ruta | Descripción |
+1. Tener **MySQL** encendido en `localhost:3306` (la base `gasvolcan` se crea sola).
+2. Si tu MySQL no usa `root` sin clave, define las variables de entorno `DB_USER` y `DB_PASSWORD`
+   (o edita `src/main/resources/application.properties`).
+3. Ejecutar (con JDK 17 o 21; **no** JDK 25):
+   ```bash
+   mvn spring-boot:run
+   ```
+   o abrir la carpeta en IntelliJ / VS Code (Extension Pack for Java) y ejecutar `GasVolcanApplication`.
+4. Listo: API en `http://localhost:8080` y **Swagger en http://localhost:8080/swagger-ui.html**.
+
+La primera vez, `DataInitializer` carga categorías, productos, 2 camiones y las cuentas de prueba:
+
+| Rol | Correo | Contraseña |
 |---|---|---|
-| GET | `/api/sectores` | Lista los sectores |
-| GET | `/api/sectores/{id}` | Un sector |
-| GET | `/api/sectores/{id}/cultivos` | Cultivos de un sector |
-| POST | `/api/sectores` | Crea un sector |
-| PUT | `/api/sectores/{id}` | Modifica un sector |
-| DELETE | `/api/sectores/{id}` | Elimina (no se puede si tiene cultivos) |
-| GET | `/api/cultivos` | Lista los cultivos |
-| GET | `/api/cultivos/{id}` | Un cultivo |
-| POST | `/api/cultivos` | Crea un cultivo |
-| PUT | `/api/cultivos/{id}` | Modifica un cultivo |
-| DELETE | `/api/cultivos/{id}` | Elimina un cultivo |
+| Administrador | admin@duoc.cl | admin123 |
+| Operadora | operadora@duoc.cl | opera123 |
+| Repartidor | repenzo@duoc.cl · repjaviera@duoc.cl · repnico@duoc.cl | reparte123 |
 
-Ejemplo de JSON (POST `/api/sectores`):
-```json
-{ "codigo": "S-05", "nombre": "Bancal Sur", "descripcion": "Nuevo bancal", "ubicacion": "Patio",
-  "estado": "DISPONIBLE", "responsableId": 1, "fechaCreacion": "21/11/2026", "fechaActualizacion": "21/11/2026" }
+Opcional: `JWT_SECRET` (mínimo 32 caracteres) cambia la clave con la que se firman los tokens.
+
+## Probar JWT en Swagger
+1. `POST /api/v1/auth/login` con `{ "correo": "admin@duoc.cl", "contrasena": "admin123" }` → entrega `accessToken` y `refreshToken`.
+2. Botón **Authorize** (arriba a la derecha) → pegar el `accessToken` → *Authorize*.
+3. Ya puedes probar los endpoints protegidos. Sin token responde **401**; con un rol que no corresponde, **403**.
+4. `POST /api/v1/auth/refresh` con el `refreshToken` entrega tokens nuevos (renovación).
+
+## JWT
+- **Access token**: 30 minutos. Lleva el correo (subject), el rol y el tipo (`access`).
+- **Refresh token**: 7 días, tipo `refresh` (no sirve para llamar a la API, solo para renovar).
+- Firma HS256 con la clave `jwt.secret`. `JwtAuthFilter` valida firma y vencimiento en cada petición y vuelve a cargar al usuario desde la base de datos.
+
+## Endpoints y roles (`/api/v1`)
+| Recurso | Endpoint | Quién puede |
+|---|---|---|
+| Auth | `POST /auth/login`, `POST /auth/register`, `POST /auth/refresh` | Público |
+| Auth | `GET /auth/me` | Cualquier usuario con sesión |
+| Productos | `GET /productos`, `GET /productos/{codigo}` | Público |
+| Productos | `POST`, `PUT /{codigo}`, `DELETE /{codigo}` | Administrador |
+| Categorías | `GET` | Público |
+| Categorías | `POST`, `PUT /{id}`, `DELETE /{id}` (409 si tiene productos) | Administrador |
+| Usuarios | `GET`, `GET /{run}`, `POST`, `PUT /{run}`, `DELETE /{run}` | Administrador |
+| Usuarios | `GET /usuarios/repartidores` | Administrador, Operadora |
+| Camiones | `GET /camiones` | Administrador, Operadora |
+| Órdenes | `POST /ordenes` (compra), `POST /ordenes/rapido`, `PUT /ordenes/{n}/pago` (reintento) | Público (con sesión queda a nombre del usuario) |
+| Órdenes | `GET /ordenes` | Administrador, Operadora |
+| Órdenes | `GET /ordenes/mis` | Cliente |
+| Órdenes | `GET /ordenes/mis-entregas` | Repartidor |
+| Órdenes | `GET /ordenes/{n}` | Dueño de la orden, repartidor asignado, Operadora, Administrador |
+| Órdenes | `POST /ordenes/telefono` (pedido por llamada) | Operadora, Administrador |
+| Órdenes | `POST /ordenes/{n}/asignacion` (camión + repartidor) | Operadora, Administrador |
+| Órdenes | `PUT /ordenes/{n}/estado` | Repartidor asignado (en-camino, entregado) · Operadora/Administrador (cancelado) |
+
+## Reglas de negocio (se validan en el servidor)
+- RUN y correo únicos; correo con dominio `duoc.cl`, `profesor.duoc.cl` o `gmail.com`; el registro público siempre crea un **Cliente**.
+- Los **precios los calcula el servidor** (el cliente solo envía código y cantidad); el stock se descuenta al comprar y no puede quedar negativo.
+- Pago simulado: efectivo siempre aprobado; tarjeta de 16 dígitos, y si termina en `0000` se rechaza (orden `pago-fallido`, se puede reintentar). El número de tarjeta nunca se guarda.
+- Reparto: un repartidor sale en **un solo camión** y un camión lo lleva **un solo repartidor**, pero puede llevar varios pedidos a la vez (si no, 409).
+- Flujo: `pendiente → asignado → en-camino → entregado` (cancelado desde pendiente, asignado o en-camino).
+- Errores en JSON: `{ "estado": 409, "mensaje": "...", "errores": { campo: mensaje } }`.
+
+## Pruebas automáticas
+
+```bash
+mvn test
 ```
 
-## ✅ Reglas y respuestas de error
-| Regla | Respuesta |
-|---|---|
-| Campos obligatorios, formato `S-01`, fechas `dd/mm/aaaa`, riego entre 1 y 30 | 400 Bad Request (con el error de cada campo) |
-| Código de sector repetido | 409 Conflict |
-| Cosecha o trasplante antes de la siembra | 409 Conflict |
-| Eliminar un sector con cultivos | 409 Conflict |
-| Id que no existe | 404 Not Found |
+Usan H2 en memoria (no necesitan MySQL): `OrdenServiceTest` y `UsuarioServiceTest` (JUnit 5 + Mockito, reglas de negocio),
+`EstadoOrdenTest`, `OrdenPersistenciaTest` (`@DataJpaTest`) y `ApiSeguridadTest` (JWT y roles con MockMvc).
+La guía para la presentación está en `docs/GUIA_PRESENTACION.md`.
 
-## ▶️ Cómo ejecutar
-1. Abrir **XAMPP** y presionar **Start** en **MySQL** (puerto 3306, usuario `root` sin clave).
-2. Abrir esta carpeta en **IntelliJ IDEA** (abrir el `pom.xml` como proyecto) y esperar que Maven descargue las dependencias.
-3. Si pide JDK: **File → Project Structure → SDK → Download JDK → versión 17**.
-4. Ejecutar `HuertoApiApplication` (▶ verde).
-5. Probar en el navegador: http://localhost:8080/api/sectores
-
-La base `huerto_db` y sus tablas se crean solas (`ddl-auto=update`). Se ven en phpMyAdmin: http://localhost/phpmyadmin
-
-## 🧪 Pruebas unitarias
-`src/test/java/cl/duoc/huertoapi/service/` → clic derecho → **Run Tests**. Usan Mockito, así que **no necesitan MySQL encendido**.
-| Archivo | Qué prueba |
-|---|---|
-| `SectorServiceTest` | Crear sector, código repetido, eliminar sector con cultivos, id inexistente |
-| `CultivoServiceTest` | Cosecha antes de la siembra, fecha imposible, sector inexistente, crear cultivo válido |
+## Estructura
+```
+src/main/java/cl/gasvolcan/api/
+  config/      SecurityConfig, OpenApiConfig, DataInitializer
+  security/    JwtService, JwtAuthFilter, SesionActual, respuestas 401/403
+  model/       Usuario, Categoria, Producto, Camion, Orden, OrdenItem, enums
+  repository/  interfaces Spring Data JPA
+  dto/         objetos de entrada/salida de la API
+  service/     lógica de negocio
+  controller/  endpoints REST (@PreAuthorize por rol)
+  exception/   errores de negocio y manejador global
+```
